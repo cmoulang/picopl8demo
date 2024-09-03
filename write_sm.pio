@@ -1,0 +1,175 @@
+/*
+ * PIO state machine programs for handling write operations on the 6502 bus.
+ */
+
+.define PUBLIC PIN_PA0 2
+.define PUBLIC PIN_PA1 3
+.define PUBLIC PIN_PA2 4
+.define PUBLIC PIN_PA3 5
+
+.define PUBLIC PIN_1MHZ 6
+.define PUBLIC PIN_R_NW 7
+
+.define PUBLIC PIN_D0 8
+.define PUBLIC PIN_D1 9
+.define PUBLIC PIN_D2 10
+.define PUBLIC PIN_D3 11
+.define PUBLIC PIN_D4 12
+.define PUBLIC PIN_D5 13
+.define PUBLIC PIN_D6 14
+.define PUBLIC PIN_D7 15
+
+.define PUBLIC PIN_NRST 16
+.define PUBLIC PIN_NB400 17
+
+.define IRQ_NUM 4
+
+; 
+.program write_addr_handler
+
+.define _PIN_NB400 (PIN_NB400 - PIN_PA0)
+
+    pull                    ; initialise x to the base address from the cpu
+    mov x osr
+.wrap_target
+    in x 28                 ; shift upper bits of address into ISR
+again:
+    wait 1 pin _PIN_NB400    ; wait for select (active low)
+    wait 0 pin _PIN_NB400
+    jmp pin again           ; ignore 6502 reads
+    in pins 4               ; shift lower bits of address into ISR - and push
+    irq clear IRQ_NUM       ; wake up the data bus reader
+.wrap
+
+
+% c-sdk {
+
+// Setup the SM pins and ISR behaviour. 
+void write_addr_handler_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = write_addr_handler_program_get_default_config(offset);
+    sm_config_set_jmp_pin 	(&c, PIN_R_NW);  	
+    sm_config_set_in_pins(&c, PIN_PA0);
+    sm_config_set_in_shift(&c, false, true, 32);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
+
+
+.program write_data_handler
+
+.define _PIN_1MHZ ((PIN_1MHZ-PIN_D0)+32)
+
+.wrap_target
+    irq wait IRQ_NUM        ; wait for interrupt signal
+    wait 1 PIN _PIN_1MHZ     ; wait for clock
+    wait 0 PIN _PIN_1MHZ
+    in pins 8               ; data bus should be valid now - read it
+.wrap
+
+% c-sdk {
+// Setup the SM pins and ISR behaviour. 
+void write_data_handler_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = write_data_handler_program_get_default_config(offset); 	
+    sm_config_set_in_pins(&c, PIN_D0);
+    sm_config_set_in_shift(&c, false, true, 8);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+%}
+
+.program activity_handler
+
+; PIO State machine for monitoring activity on the 6502 interface
+
+; Note: because we set_in_pins to 2 - pin numbering starts at 2 (so 15 = GPIO17)
+.define _PIN_NB400 (PIN_NB400 - PIN_PA0)
+.define _PIN_1MHZ (PIN_1MHZ - PIN_PA0)
+
+.wrap_target
+    wait 1 pin _PIN_NB400    ; wait for select (active low)
+    wait 0 pin _PIN_NB400
+    in pins 6               ; read the address and RNW pins
+    wait 1 PIN _PIN_1MHZ     ; wait for clock
+    wait 0 PIN _PIN_1MHZ
+    push noblock
+.wrap
+
+
+% c-sdk {
+
+// Setup the SM pins and ISR behaviour. 
+void activity_handler_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = activity_handler_program_get_default_config(offset);
+    sm_config_set_in_pins(&c, PIN_PA0);
+    sm_config_set_in_shift(&c, false, false, 32);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_RX);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}
+
+.program read_addr_handler
+
+// Capture address from a 6502 bus read on PL8.
+.define _PIN_NB400 (PIN_NB400 - PIN_PA0)
+
+    pull                    ; read the buffer address from the fifo
+    mov x osr               ; and save it in x
+.wrap_target
+    in x 28                 ; copy top 28 bits of address to ISR
+again:
+    wait 1 pin _PIN_NB400    ; wait for end of select cycle
+    wait 0 pin _PIN_NB400    ; wait for chip select
+    jmp pin read            ; process 6502 read operations
+    jmp again               ; ignore write operations
+read:
+    in pins 4               ; read lower 4 bits of address to ISR
+.wrap
+
+% c-sdk {
+
+void read_addr_handler_program_init(PIO pio, uint sm, uint offset) {
+    pio_sm_config c = read_addr_handler_program_get_default_config(offset);
+    sm_config_set_jmp_pin (&c, PIN_R_NW); 	
+    sm_config_set_in_pins(&c, PIN_PA0);
+    sm_config_set_in_shift(&c, false, true, 32);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);    
+}
+
+%}
+
+.program read_data_handler
+
+.define _PIN_1MHZ PIN_1MHZ
+
+.wrap_target
+    pull                    ; read data from fifo
+    out pins 8              ; output to D0-D7
+    mov osr ~NULL
+    out pindirs 8           ; set D0-D7 to output mode
+    mov osr NULL
+    wait 1 pin _PIN_1MHZ
+    wait 0 pin _PIN_1MHZ     ; wait for clock
+    out pindirs 8           ; set D0-D7 back to input mode
+.wrap
+
+% c-sdk {
+
+void read_data_handler_program_init(PIO pio, uint sm, uint offset)
+{
+    int gpio_func = piou_gpio_func(pio);
+    for (int i = 0; i <= 7; i++)
+    {
+        gpio_set_function(PIN_D0 + i, gpio_func);
+    }
+
+    pio_sm_config c = read_data_handler_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, PIN_D0, 8);
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+%}

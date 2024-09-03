@@ -2,6 +2,7 @@
  * PIO state machine programs for handling write operations on the 6502 bus.
  */
 
+// pl8 signal and the corresponding GPIO pin number.
 .define PUBLIC PIN_PA0 2
 .define PUBLIC PIN_PA1 3
 .define PUBLIC PIN_PA2 4

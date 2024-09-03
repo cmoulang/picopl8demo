@@ -320,5 +320,6 @@ int main()
 
     // The interface is now running on the PIOs and DMAs 
     // so the cpu is free to do anything it wants.
+    // 
     simple_demo();
 }

@@ -296,6 +296,10 @@ void simple_demo()
             {
                 printf("%2x ", pl8.buffer[i]);
             }
+            for (int i=0; i <16;i++) {
+                char c = pl8.buffer[i];
+                printf("%c", (c >= 30 && c <=126) ? c : '.');
+            }
             printf("\nRead ");
             for (int i = 15; i >= 0; i--)
             {

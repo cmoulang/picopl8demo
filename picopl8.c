@@ -19,7 +19,7 @@ static_assert(sizeof(int) == 4);
 struct
 {
     // 16 byte buffer that can be accessed by the 6502 at 0xB400
-    _Alignas(16) char buffer[16];
+    _Alignas(16 * 2) uint16_t buffer[16];
     unsigned int read_bits;
     unsigned int written_bits;
     int read_count;
@@ -30,6 +30,16 @@ struct
     PIO pio_activity_handler;
     uint sm_activity_handler;
 } pl8;
+
+static inline uint8_t pl8_get_byte(int index)
+{
+    return pl8.buffer[index] & 0xFF;
+}
+
+static inline uint pl8_buffer_address()
+{
+    return (uint)&pl8.buffer;
+}
 
 /*! \brief Obtain the read bitmask - the bitmask is cleared by this operation.
  *
@@ -164,10 +174,10 @@ int initialise_6502_PIO()
         &offset);
     read_data_handler_program_init(pio_read_data_handler, sm_read_data_handler, offset);
 
-    uint buffer_address = (uint)&pl8.buffer;
+    uint buffer_address = pl8_buffer_address();
     printf("Buffer starts at: %p\n", buffer_address);
-    pio_sm_put(pio_write_addr_handler, sm_write_addr_handler, buffer_address >> 4);
-    pio_sm_put(pio_read_addr_handler, sm_read_addr_handler, buffer_address >> 4);
+    pio_sm_put(pio_write_addr_handler, sm_write_addr_handler, buffer_address >> 5);
+    pio_sm_put(pio_read_addr_handler, sm_read_addr_handler, buffer_address >> 5);
 
     uint write_addr_chan = dma_claim_unused_channel(true);
     uint write_data_chan = dma_claim_unused_channel(true);
@@ -229,7 +239,7 @@ int initialise_6502_PIO()
         dma_channel_config c = dma_channel_get_default_config(read_data_chan);
         channel_config_set_high_priority(&c, true);
         // channel_config_set_dreq(&c, pio_get_dreq(pio_read_data_handler, sm_write_data_handler, false));
-        channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+        channel_config_set_transfer_data_size(&c, DMA_SIZE_16);
         channel_config_set_read_increment(&c, 0);
         channel_config_set_write_increment(&c, 0);
         channel_config_set_chain_to(&c, read_addr_chan);
@@ -283,6 +293,10 @@ void simple_demo()
     int freq = measure_freq(PIN_1MHZ);
     printf("6502 clock = %.2f MHz\n", freq / 1000000.0);
 
+    for (int i = 0; i < 16; i++)
+    {
+        pl8.buffer[i] = 0x100;
+    }
 
     while (true)
     {
@@ -294,11 +308,12 @@ void simple_demo()
             printf("PL8 Status\nData ");
             for (int i = 15; i >= 0; i--)
             {
-                printf("%2x ", pl8.buffer[i]);
+                printf("%2x ", pl8_get_byte(i));
             }
-            for (int i=0; i <16;i++) {
-                char c = pl8.buffer[i];
-                printf("%c", (c >= 30 && c <=126) ? c : '.');
+            for (int i = 0; i < 16; i++)
+            {
+                char c = pl8_get_byte(i);
+                printf("%c", (c >= 30 && c <= 126) ? c : '.');
             }
             printf("\nRead ");
             for (int i = 15; i >= 0; i--)
@@ -322,8 +337,8 @@ int main()
     stdio_init_all();
     initialise_6502_PIO();
 
-    // The interface is now running on the PIOs and DMAs 
+    // The interface is now running on the PIOs and DMAs
     // so the cpu is free to do anything it wants.
-    // 
+    //
     simple_demo();
 }

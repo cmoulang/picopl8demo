@@ -33,12 +33,13 @@
     pull                    ; initialise x to the base address from the cpu
     mov x osr
 .wrap_target
-    in x 28                 ; shift upper bits of address into ISR
+    in x 27                 ; shift upper bits of address into ISR
 again:
     wait 1 pin _PIN_NB400    ; wait for select (active low)
     wait 0 pin _PIN_NB400
     jmp pin again           ; ignore 6502 reads
     in pins 4               ; shift lower bits of address into ISR - and push
+    in y 1
     irq clear IRQ_NUM       ; wake up the data bus reader
 .wrap
 
@@ -119,7 +120,7 @@ void activity_handler_init(PIO pio, uint sm, uint offset) {
     pull                    ; read the buffer address from the fifo
     mov x osr               ; and save it in x
 .wrap_target
-    in x 28                 ; copy top 28 bits of address to ISR
+    in x 27                 ; copy top 28 bits of address to ISR
 again:
     wait 1 pin _PIN_NB400    ; wait for end of select cycle
     wait 0 pin _PIN_NB400    ; wait for chip select
@@ -127,6 +128,7 @@ again:
     jmp again               ; ignore write operations
 read:
     in pins 4               ; read lower 4 bits of address to ISR
+    in y 1
 .wrap
 
 % c-sdk {
@@ -147,13 +149,16 @@ void read_addr_handler_program_init(PIO pio, uint sm, uint offset) {
 .define _PIN_1MHZ PIN_1MHZ
 
 .wrap_target
-    pull                    ; read data from fifo
-    out pins 8              ; output to D0-D7
+    pull                    ; read 16 bits of data from fifo
+    out pins 8              ; output 8 bits to D0-D7
+    out y 1                 ; shift "readable" status bit into y 
+    jmp ~y skip             ; skip if not set
     mov osr ~NULL
     out pindirs 8           ; set D0-D7 to output mode
+skip:
     mov osr NULL
     wait 1 pin _PIN_1MHZ
-    wait 0 pin _PIN_1MHZ     ; wait for clock
+    wait 0 pin _PIN_1MHZ    ; wait for clock
     out pindirs 8           ; set D0-D7 back to input mode
 .wrap
 
